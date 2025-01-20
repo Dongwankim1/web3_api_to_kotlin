@@ -3,16 +3,14 @@
  */
 package org.example
 
-import org.p2p.solanaj.core.PublicKey
 import org.p2p.solanaj.core.Account
-import org.p2p.solanaj.programs.TokenProgram
-import org.p2p.solanaj.programs.AssociatedTokenProgram
-import org.p2p.solanaj.rpc.RpcClient
-import org.p2p.solanaj.programs.SystemProgram
+import org.p2p.solanaj.core.PublicKey
 import org.p2p.solanaj.core.Transaction
-import org.bitcoinj.core.Base58
+import org.p2p.solanaj.programs.AssociatedTokenProgram
+import org.p2p.solanaj.programs.SystemProgram
+import org.p2p.solanaj.programs.TokenProgram
+import org.p2p.solanaj.rpc.RpcClient
 import java.math.BigInteger
-
 
 fun main() {
     println("qfqwfqwf")
@@ -24,9 +22,10 @@ fun main() {
     val secretKey = "digital drink present man hamster leave orbit scorpion tackle cheese chat cabbage"
     val solanaService = SolanaService()
 
+
     println(solanaService.getBalance(rpcEndpoint, userPublicKey))
 
-    //solanaService.splTokenBalance(rpcEndpoint, secretKey, userPublicKey, mint)
+    // solanaService.splTokenBalance(rpcEndpoint, secretKey, userPublicKey, mint)
     solanaService.splTokenBalance(rpcEndpoint, secretKey, noTokenUserPublicKey, mint)
 }
 
@@ -34,7 +33,7 @@ fun main() {
 class SolanaService {
 
     val associatedTokenProgramId = PublicKey("ATokenGPv1c2trTcbGnQ4WJNe48CwKM9DRJ8DRprz9x")
-
+    val ACCOUNT_LAYOUT_SIZE:Long = 165L
 
     private fun getConnection(rpcEndpoint: String): RpcClient {
         return RpcClient(rpcEndpoint)
@@ -145,7 +144,7 @@ class SolanaService {
 
         // If ATA doesn't exist, create it
         val transaction = Transaction()
-        val rentExemption = connection.api.getMinimumBalanceForRentExemption(165)
+        // val rentExemption = connection.api.getMinimumBalanceForRentExemption(165)
         // transaction.addInstruction(
         //     TokenProgram.createAssociatedTokenAccount(
         //         payer.publicKey, // 생성 비용을 지불하는 계정
@@ -153,13 +152,19 @@ class SolanaService {
         //         mint             // 관리할 Mint 주소
         //     )
         // )
+        val lamportsRequired: Long = connection.getApi().getMinimumBalanceForRentExemption(ACCOUNT_LAYOUT_SIZE)
+        // 새 토큰 계정
+        // 새 토큰 계정
+        val tokenAccount: Keypair = Keypair.generate()
+        val tokenAccountPublicKey: PublicKey = tokenAccount.getPublicKey()
+// SPL 토큰 계정 생성
         transaction.addInstruction(
             SystemProgram.createAccount(
-                payer.publicKey,
-                owner,
-                LAMPORTS_PER_SOL.toLong(),
-                128,
-                programId
+                payer.publicKey,  // 계정 생성 비용을 지불할 계정
+                tokenAccountPublicKey,  // 새로 생성할 SPL 토큰 계정
+                lamportsRequired,  // 계정 생성에 필요한 Lamports
+                ACCOUNT_LAYOUT_SIZE,  // SPL 토큰 계정의 공간
+                TokenProgram.PROGRAM_ID // SPL 토큰 프로그램 ID
             )
         )
 
@@ -170,9 +175,10 @@ class SolanaService {
                 owner
             )
         )
-
-        connection.api.sendTransaction(transaction, payer)
+        val signature: String = connection.getApi().sendTransaction(transaction, payer)
+        // connection.api.sendTransaction(transaction, payer)
         print("associatedTokenAddress.address" + associatedTokenAddress.address)
+        print("signature = " +signature)
         return Pair(associatedTokenAddress.address, BigInteger.ZERO)
     }
 

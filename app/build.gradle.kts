@@ -24,7 +24,8 @@ dependencies {
     implementation(libs.guava)
     //    implementation(kotlin("stdlib")) // Kotlin 표준 라이브러리
     // implementation("org.apache.commons:commons-text")
-    implementation("com.mmorrell:solanaj:1.19.2")
+    // implementation("com.mmorrell:solanaj:1.19.2")
+    implementation("com.mmorrell:solanaj:1.20.2")
 	implementation("org.bitcoinj:bitcoinj-core:0.15.10")
 
 }
