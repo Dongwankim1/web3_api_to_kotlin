@@ -19,13 +19,15 @@ fun main() {
     val rpcEndpoint = "https://api.devnet.solana.com"
     val publicKey = "8ixPw2F1J2g724nkYeZtg4fEFrWTRf2Tna965rbwsVoD"
     val userPublicKey = "CZtRsFZ9oRNjU1tiS5PrETT8aEQTVAnA4FKCRPVdWWJe"
+    val noTokenUserPublicKey = "98HNCdVFAddLntayXeRz68JV49RX1TgqSRYT5mRf6QCu"
     val mint = "E3iTukHHrabJ1f3mW8rKRZV6Y4PKMzoLD1HmN8gNGpgt"
     val secretKey = "digital drink present man hamster leave orbit scorpion tackle cheese chat cabbage"
     val solanaService = SolanaService()
 
     println(solanaService.getBalance(rpcEndpoint, userPublicKey))
 
-    solanaService.splTokenBalance(rpcEndpoint, secretKey, userPublicKey, mint)
+    //solanaService.splTokenBalance(rpcEndpoint, secretKey, userPublicKey, mint)
+    solanaService.splTokenBalance(rpcEndpoint, secretKey, noTokenUserPublicKey, mint)
 }
 
 
@@ -73,7 +75,7 @@ class SolanaService {
         secretKey: String,
         userPublicKey: String,
         mint: String
-    ): Double {
+    ): BigInteger {
 
         val connection = getConnection(rpcEndpoint)
 
@@ -95,10 +97,10 @@ class SolanaService {
                 TokenProgram.PROGRAM_ID
             )
             println("tokenAccount  " + tokenAccount)
-            0.0
+            return tokenAccount.second
         } catch (e: Exception) {
             println("Error fetching SPL token balance: ${e.message}")
-            0.0
+            return BigInteger.valueOf(0L)
         }
         //     // Get the token balance
         //     val balanceResponse = connection.api.getTokenAccountBalance(tokenAccount.publicKey)
@@ -134,7 +136,7 @@ class SolanaService {
         // Check if the ATA exists
         val accountInfo = connection.api.getAccountInfo(associatedTokenAddress.address)
         println("accountInfo = " + accountInfo);
-        if (accountInfo != null) {
+        if (accountInfo.value != null) {
             // Fetch balance if ATA exists
             val tokenBalance = connection.api.getTokenAccountBalance(associatedTokenAddress.address)
             return Pair(associatedTokenAddress.address, BigInteger(tokenBalance.amount))
@@ -144,13 +146,19 @@ class SolanaService {
         // If ATA doesn't exist, create it
         val transaction = Transaction()
         val rentExemption = connection.api.getMinimumBalanceForRentExemption(165)
-
+        // transaction.addInstruction(
+        //     TokenProgram.createAssociatedTokenAccount(
+        //         payer.publicKey, // 생성 비용을 지불하는 계정
+        //         owner,           // 새 토큰 계정의 소유자
+        //         mint             // 관리할 Mint 주소
+        //     )
+        // )
         transaction.addInstruction(
             SystemProgram.createAccount(
                 payer.publicKey,
-                associatedTokenAddress.address,
-                rentExemption,
-                165,
+                owner,
+                LAMPORTS_PER_SOL.toLong(),
+                128,
                 programId
             )
         )
@@ -163,7 +171,7 @@ class SolanaService {
             )
         )
 
-        // connection.api.sendTransaction(transaction, listOf(payer))
+        connection.api.sendTransaction(transaction, payer)
         print("associatedTokenAddress.address" + associatedTokenAddress.address)
         return Pair(associatedTokenAddress.address, BigInteger.ZERO)
     }
