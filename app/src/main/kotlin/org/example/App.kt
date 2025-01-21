@@ -7,10 +7,11 @@ import org.p2p.solanaj.core.Account
 import org.p2p.solanaj.core.PublicKey
 import org.p2p.solanaj.core.Transaction
 import org.p2p.solanaj.programs.AssociatedTokenProgram
-import org.p2p.solanaj.programs.SystemProgram
 import org.p2p.solanaj.programs.TokenProgram
 import org.p2p.solanaj.rpc.RpcClient
+import org.p2p.solanaj.rpc.RpcException
 import java.math.BigInteger
+
 
 fun main() {
     println("qfqwfqwf")
@@ -144,41 +145,20 @@ class SolanaService {
 
         // If ATA doesn't exist, create it
         val transaction = Transaction()
-        // val rentExemption = connection.api.getMinimumBalanceForRentExemption(165)
-        // transaction.addInstruction(
-        //     TokenProgram.createAssociatedTokenAccount(
-        //         payer.publicKey, // 생성 비용을 지불하는 계정
-        //         owner,           // 새 토큰 계정의 소유자
-        //         mint             // 관리할 Mint 주소
-        //     )
-        // )
-        val lamportsRequired: Long = connection.getApi().getMinimumBalanceForRentExemption(ACCOUNT_LAYOUT_SIZE)
-        // 새 토큰 계정
-        // 새 토큰 계정
-        val tokenAccount: Keypair = Keypair.generate()
-        val tokenAccountPublicKey: PublicKey = tokenAccount.getPublicKey()
-// SPL 토큰 계정 생성
+        val create = AssociatedTokenProgram.createIdempotent(payer.publicKey, owner, mint)
         transaction.addInstruction(
-            SystemProgram.createAccount(
-                payer.publicKey,  // 계정 생성 비용을 지불할 계정
-                tokenAccountPublicKey,  // 새로 생성할 SPL 토큰 계정
-                lamportsRequired,  // 계정 생성에 필요한 Lamports
-                ACCOUNT_LAYOUT_SIZE,  // SPL 토큰 계정의 공간
-                TokenProgram.PROGRAM_ID // SPL 토큰 프로그램 ID
-            )
+            create
         )
+        try {
+            val signature: String = connection.getApi().sendTransaction(transaction, payer)
+            val status = connection.getApi().getTransaction(signature)
+            // connection.api.sendTransaction(transaction, payer)
+            print("associatedTokenAddress.address" + create)
+            print("signature = " +signature)
+        }catch (e: RpcException){
+            println(e.message)
+        }
 
-        transaction.addInstruction(
-            TokenProgram.initializeAccount(
-                associatedTokenAddress.address,
-                mint,
-                owner
-            )
-        )
-        val signature: String = connection.getApi().sendTransaction(transaction, payer)
-        // connection.api.sendTransaction(transaction, payer)
-        print("associatedTokenAddress.address" + associatedTokenAddress.address)
-        print("signature = " +signature)
         return Pair(associatedTokenAddress.address, BigInteger.ZERO)
     }
 
