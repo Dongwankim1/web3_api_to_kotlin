@@ -25,6 +25,9 @@ dependencies {
     //    implementation(kotlin("stdlib")) // Kotlin 표준 라이브러리
     // implementation("org.apache.commons:commons-text")
     // implementation("com.mmorrell:solanaj:1.19.2")
+    implementation("org.bouncycastle:bcprov-jdk15on:1.70")
+    implementation("com.ionspin.kotlin:bignum:0.3.10")
+    implementation("org.web3j:core:4.9.8")
     implementation("com.mmorrell:solanaj:1.20.2")
 	implementation("org.bitcoinj:bitcoinj-core:0.15.10")
 

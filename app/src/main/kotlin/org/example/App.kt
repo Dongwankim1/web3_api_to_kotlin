@@ -3,6 +3,8 @@
  */
 package org.example
 
+import org.bitcoinj.core.Base58
+import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters
 import org.p2p.solanaj.core.Account
 import org.p2p.solanaj.core.PublicKey
 import org.p2p.solanaj.core.Transaction
@@ -10,8 +12,8 @@ import org.p2p.solanaj.programs.AssociatedTokenProgram
 import org.p2p.solanaj.programs.TokenProgram
 import org.p2p.solanaj.rpc.RpcClient
 import org.p2p.solanaj.rpc.RpcException
+import org.web3j.crypto.MnemonicUtils
 import java.math.BigInteger
-
 
 fun main() {
     println("qfqwfqwf")
@@ -21,40 +23,45 @@ fun main() {
     val noTokenUserPublicKey = "98HNCdVFAddLntayXeRz68JV49RX1TgqSRYT5mRf6QCu"
     val mint = "E3iTukHHrabJ1f3mW8rKRZV6Y4PKMzoLD1HmN8gNGpgt"
     val secretKey = "digital drink present man hamster leave orbit scorpion tackle cheese chat cabbage"
-    val solanaService = SolanaService()
+    val solanaService = SolanaModule()
 
 
-    println(solanaService.getBalance(rpcEndpoint, userPublicKey))
+    println(solanaService.getBalance("87j7biqJpvvUvgNqvZPXShDJ8md3yszBcuSCCBL9Vu9d"))
 
     // solanaService.splTokenBalance(rpcEndpoint, secretKey, userPublicKey, mint)
-    solanaService.splTokenBalance(rpcEndpoint, secretKey, noTokenUserPublicKey, mint)
+    //solanaService.splTokenBalance(secretKey, userPublicKey, mint)
+
+    //토큰 전송테스트
+    val dto = SolanaModule.SplTokenTransferDto(
+        secretKey,
+        noTokenUserPublicKey,
+        mint,
+        BigInteger.valueOf(5000L)
+    )
+
+    solanaService.splTokenTransfer(dto)
+
 }
 
 
-class SolanaService {
-
+class SolanaModule {
+    val rpcEndpoint = "https://api.devnet.solana.com"
     val associatedTokenProgramId = PublicKey("ATokenGPv1c2trTcbGnQ4WJNe48CwKM9DRJ8DRprz9x")
     val ACCOUNT_LAYOUT_SIZE:Long = 165L
+    val connection: RpcClient
 
+    init {
+        connection = getConnection(rpcEndpoint)
+    }
     private fun getConnection(rpcEndpoint: String): RpcClient {
         return RpcClient(rpcEndpoint)
     }
 
-    fun testConnection(rpcEndpoint: String): String {
-        val client = getConnection(rpcEndpoint)
-        return try {
-            val version = client.api.getVersion() // Test API call
-            "Connected to Solana RPC: $version"
-        } catch (e: Exception) {
-            "Failed to connect to Solana RPC: ${e.message}"
-        }
-    }
-
-    fun getBalance(rpcEndpoint: String, publicKey: String): Double {
+    fun getBalance(publicKey: String): Double {
         println("getBalance")
-        val connection = getConnection(rpcEndpoint)
+
         return try {
-            val lamports = connection.api.getBalance(PublicKey(publicKey))
+            val lamports = this.connection.api.getBalance(PublicKey(publicKey))
             lamports.toDouble() / LAMPORTS_PER_SOL
         } catch (e: Exception) {
             println("Error fetching balance: ${e.message}")
@@ -64,57 +71,113 @@ class SolanaService {
 
     /**
      * 현재 토큰 밸런스 가져오기
-     * @param rpcEndpoint String 솔라나 주소
-     * @param secretKey String 민팅 owner 시크릿키
-     * @param userPublicKey String 조회할 사용자 지갑주소
-     * @param mint String 민팅 주소
+     * @param secretKey String - 민팅 owner 시크릿키 (payer)
+     * @param userPublicKey String - 조회할 사용자 지갑주소
+     * @param mint String - 민팅 주소
      * @return Double
      */
     fun splTokenBalance(
-        rpcEndpoint: String,
         secretKey: String,
         userPublicKey: String,
         mint: String
     ): BigInteger {
 
-        val connection = getConnection(rpcEndpoint)
-
         val mintAddress = PublicKey(mint)
 
-        // val secretByteArray = Base58.encode(secretKey.toByteArray());
-        val secretKeypair = Account(secretKey.toByteArray())
+
+        // 3. 공개 키 생성
+        val generateSolanaAccount = generateSolanaAccount(secretKey, "")
 
         // Select the correct program ID and lamports conversion based on the environment
         return try {
             // Find or create the associated token account
             val tokenAccount = getOrCreateAssociatedTokenAccount(
-                connection,
-                secretKeypair,
+                generateSolanaAccount,
                 mintAddress,
                 PublicKey(userPublicKey),
                 false,
                 "comfirmd",
                 TokenProgram.PROGRAM_ID
             )
-            println("tokenAccount  " + tokenAccount)
-            return tokenAccount.second
+
+
+            val amount = if(tokenAccount.second.compareTo(BigInteger.valueOf(0L))>=0){
+                tokenAccount.second.divide(BigInteger.valueOf(LAMPORTS_PER_SOL));
+            } else {
+                BigInteger.valueOf(0L)
+            }
+            println("tokenAccount.second  " + amount)
+            return amount
         } catch (e: Exception) {
             println("Error fetching SPL token balance: ${e.message}")
             return BigInteger.valueOf(0L)
         }
-        //     // Get the token balance
-        //     val balanceResponse = connection.api.getTokenAccountBalance(tokenAccount.publicKey)
-        //     val tokenAmount = balanceResponse?.value?.uiAmount ?: 0.0
 
-        //     tokenAmount / lamportsSol
-        // } catch (e: Exception) {
-        //     println("Error fetching SPL token balance: ${e.message}")
-        //     0.0
-        // }
     }
 
+    fun splTokenTransfer(request: SplTokenTransferDto): Transaction {
+        if (request.amount  < BigInteger.valueOf(0L)) {
+            throw IllegalArgumentException("Negative numbers are not allowed.")
+        }
+
+        // Decode the secret key and create an Account
+        val senderKeypair = generateSolanaAccount(request.secretKey)
+
+        // Fetch balance of the SPL Token account
+        val balance = try {
+            splTokenBalance(
+                request.secretKey,
+                senderKeypair.publicKey.toBase58(),
+                request.mint
+            )
+        } catch (e: RpcException) {
+            throw IllegalStateException("Error fetching SPL token balance: ${e.message}", e)
+        }
+
+        println("Balance: $balance")
+        println("Request amount: ${request.amount}")
+
+        if (balance < request.amount) {
+            throw IllegalArgumentException("Insufficient balance")
+        }
+
+        // Create the transaction
+        val transaction = Transaction()
+
+
+        // Add instruction to transfer SPL tokens
+        val mintAddress = PublicKey(request.mint)
+        val recipientPublicKey = PublicKey(request.recipient)
+        val transferInstruction = TokenProgram.transfer(
+            senderKeypair.publicKey,
+            recipientPublicKey,
+            request.amount.toLong(),
+            mintAddress,
+        )
+
+        transaction.addInstruction(transferInstruction)
+
+        // Sign and send the transaction
+        val signature: String = try {
+            this.connection.api.sendTransaction(transaction, senderKeypair)
+        } catch (e: RpcException) {
+            throw IllegalStateException("Transaction failed: ${e.message}", e)
+        }
+
+        println("Transaction Signature: $signature")
+
+        return transaction
+    }
+
+    // DTO class for request data
+    data class SplTokenTransferDto(
+        val secretKey: String,
+        val recipient: String,
+        val mint: String,
+        val amount: BigInteger
+    )
+
     fun getOrCreateAssociatedTokenAccount(
-        connection: RpcClient,
         payer: Account,
         mint: PublicKey,
         owner: PublicKey,
@@ -134,11 +197,11 @@ class SolanaService {
         )
         println("associatedTokenAddress : " + associatedTokenAddress.address)
         // Check if the ATA exists
-        val accountInfo = connection.api.getAccountInfo(associatedTokenAddress.address)
+        val accountInfo = this.connection.api.getAccountInfo(associatedTokenAddress.address)
         println("accountInfo = " + accountInfo);
         if (accountInfo.value != null) {
             // Fetch balance if ATA exists
-            val tokenBalance = connection.api.getTokenAccountBalance(associatedTokenAddress.address)
+            val tokenBalance = this.connection.api.getTokenAccountBalance(associatedTokenAddress.address)
             return Pair(associatedTokenAddress.address, BigInteger(tokenBalance.amount))
 
         }
@@ -150,11 +213,8 @@ class SolanaService {
             create
         )
         try {
-            val signature: String = connection.getApi().sendTransaction(transaction, payer)
-            val status = connection.getApi().getTransaction(signature)
-            // connection.api.sendTransaction(transaction, payer)
-            print("associatedTokenAddress.address" + create)
-            print("signature = " +signature)
+            val signature: String = this.connection.api.sendTransaction(transaction, payer)
+
         }catch (e: RpcException){
             println(e.message)
         }
@@ -163,12 +223,23 @@ class SolanaService {
     }
 
     companion object {
-        private const val LAMPORTS_PER_SOL = 1_000_000_000 // 1 SOL = 1 billion lamports
+        private const val LAMPORTS_PER_SOL = 1_000_000_000L // 1 SOL = 1 billion lamports
     }
 
-    fun isValidBase58(input: String): Boolean {
-        val base58Pattern = Regex("^[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]+\$")
-        return base58Pattern.matches(input)
+
+    private fun generateSolanaAccount(mnemonic: String, passphrase: String = ""): Account {
+
+        val seed = MnemonicUtils.generateSeed(mnemonic, "")
+
+        // 2. Ed25519 비밀 키 생성 (상위 32바이트)
+        val privateKey = seed.copyOf(32)
+        val privateKeyParams = Ed25519PrivateKeyParameters(privateKey, 0)
+
+        // 3. 공개 키 생성
+        val publicKey = privateKeyParams.generatePublicKey().encoded
+
+        // 4. Solana Account 생성
+        return Account(privateKey + publicKey)
     }
 
 }
