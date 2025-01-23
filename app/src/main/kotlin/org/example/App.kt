@@ -26,9 +26,9 @@ fun main() {
     val solanaService = SolanaModule()
 
 
-    println(solanaService.getBalance("87j7biqJpvvUvgNqvZPXShDJ8md3yszBcuSCCBL9Vu9d"))
+    println(solanaService.getBalance(noTokenUserPublicKey))
 
-    // solanaService.splTokenBalance(rpcEndpoint, secretKey, userPublicKey, mint)
+    solanaService.splTokenBalance(secretKey, noTokenUserPublicKey, mint)
     //solanaService.splTokenBalance(secretKey, userPublicKey, mint)
 
     //토큰 전송테스트
@@ -39,7 +39,7 @@ fun main() {
         BigInteger.valueOf(5000L)
     )
 
-    solanaService.splTokenTransfer(dto)
+    //solanaService.splTokenTransfer(dto)
 
 }
 
@@ -143,16 +143,41 @@ class SolanaModule {
 
         // Create the transaction
         val transaction = Transaction()
+        val mintAddress = PublicKey(request.mint)
+        val senderAccount = getOrCreateAssociatedTokenAccount(
+            senderKeypair,
+            mintAddress,
+            senderKeypair.publicKey,
+            false,
+            "comfirmd",
+            TokenProgram.PROGRAM_ID
+        )
 
+
+        val recipientAccount = getOrCreateAssociatedTokenAccount(
+            senderKeypair,
+            mintAddress,
+            PublicKey(request.recipient),
+            false,
+            "comfirmd",
+            TokenProgram.PROGRAM_ID
+        )
 
         // Add instruction to transfer SPL tokens
-        val mintAddress = PublicKey(request.mint)
-        val recipientPublicKey = PublicKey(request.recipient)
-        val transferInstruction = TokenProgram.transfer(
+        // val transferInstruction = TokenProgram.transfer(
+        //     mintAddress,
+        //     tokenAccount.first,
+        //     request.amount.toLong(),
+        //     senderKeypair.publicKey,
+        // )
+
+        val transferInstruction = TokenProgram.transferChecked(
+            senderAccount.first,
+            recipientAccount.first,
+            request.amount.multiply(BigInteger.valueOf(LAMPORTS_PER_SOL)).toLong(),
+            9,
             senderKeypair.publicKey,
-            recipientPublicKey,
-            request.amount.toLong(),
-            mintAddress,
+            mintAddress
         )
 
         transaction.addInstruction(transferInstruction)
@@ -177,6 +202,16 @@ class SolanaModule {
         val amount: BigInteger
     )
 
+    /**
+     *
+     * @param payer Account - 지불 계정
+     * @param mint PublicKey - 민트 주소
+     * @param owner PublicKey - 토큰 오너 주소
+     * @param allowOwnerOffCurve Boolean
+     * @param commitment String
+     * @param programId PublicKey
+     * @return Pair<PublicKey, BigInteger>
+     */
     fun getOrCreateAssociatedTokenAccount(
         payer: Account,
         mint: PublicKey,
