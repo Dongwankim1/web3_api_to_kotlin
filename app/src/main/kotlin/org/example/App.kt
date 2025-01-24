@@ -9,11 +9,13 @@ import org.p2p.solanaj.core.Account
 import org.p2p.solanaj.core.PublicKey
 import org.p2p.solanaj.core.Transaction
 import org.p2p.solanaj.programs.AssociatedTokenProgram
+import org.p2p.solanaj.programs.Program
+import org.p2p.solanaj.programs.SystemProgram
 import org.p2p.solanaj.programs.TokenProgram
 import org.p2p.solanaj.rpc.RpcClient
 import org.p2p.solanaj.rpc.RpcException
 import org.web3j.crypto.MnemonicUtils
-import java.math.BigInteger
+import java.math.BigDecimal
 
 fun main() {
     println("qfqwfqwf")
@@ -24,21 +26,16 @@ fun main() {
     val mint = "E3iTukHHrabJ1f3mW8rKRZV6Y4PKMzoLD1HmN8gNGpgt"
     val secretKey = "digital drink present man hamster leave orbit scorpion tackle cheese chat cabbage"
     val solanaService = SolanaModule()
+    println(solanaService.getSolanaBalance(PublicKey("87j7biqJpvvUvgNqvZPXShDJ8md3yszBcuSCCBL9Vu9d")))
+    //solanaService.solanaTransfer(secretKey,noTokenUserPublicKey,BigInteger.valueOf(2L));
 
+    println(solanaService.getSolanaBalance(PublicKey(noTokenUserPublicKey)))
 
-    println(solanaService.getBalance(noTokenUserPublicKey))
 
     solanaService.splTokenBalance(secretKey, noTokenUserPublicKey, mint)
     //solanaService.splTokenBalance(secretKey, userPublicKey, mint)
 
     //토큰 전송테스트
-    val dto = SolanaModule.SplTokenTransferDto(
-        secretKey,
-        noTokenUserPublicKey,
-        mint,
-        BigInteger.valueOf(5000L)
-    )
-
     //solanaService.splTokenTransfer(dto)
 
 }
@@ -57,16 +54,65 @@ class SolanaModule {
         return RpcClient(rpcEndpoint)
     }
 
-    fun getBalance(publicKey: String): Double {
+    /**
+     * 솔라나 계정 금액을 가져온다.
+     * @param publicKey String 공개키
+     * @return BigIn
+     */
+    fun getSolanaBalance(publicKey: PublicKey): BigDecimal {
         println("getBalance")
 
         return try {
-            val lamports = this.connection.api.getBalance(PublicKey(publicKey))
-            lamports.toDouble() / LAMPORTS_PER_SOL
+            val lamports = this.connection.api.getBalance(publicKey)
+            BigDecimal(lamports).divide(BigDecimal(LAMPORTS_PER_SOL))
         } catch (e: Exception) {
             println("Error fetching balance: ${e.message}")
-            0.0
+            BigDecimal.valueOf(0L)
         }
+    }
+
+    /**
+     * 솔라나를 전송한다.
+     * @param senderMnemonic String 보내는 사람 니모닉
+     * @param recipient String 받는 사람 퍼블릭키 주소
+     * @param amount BigInteger 보내는 양
+     */
+    fun solanaTransfer(senderMnemonic: String,
+                       recipientPublicKey: String,
+                       amount: BigDecimal) :Transaction{
+        if (amount  < BigDecimal.valueOf(0L)) {
+            throw IllegalArgumentException("Negative numbers are not allowed.")
+        }
+
+        // 공개키 생성
+        val senderAccount = getSolanaAccount(senderMnemonic)
+        // 솔라나 계정 금액 가져오기
+        val balance = getSolanaBalance(senderAccount.publicKey)
+
+        if (balance < amount) {
+            throw IllegalArgumentException("Insufficient balance")
+        }
+
+        val recipientPublicKey = PublicKey(recipientPublicKey)
+
+        val transferInstruction = SystemProgram.transfer(
+            senderAccount.getPublicKey(),
+            recipientPublicKey,
+            calculateAmountByPerSol(amount).toLong()
+        )
+        val transaction = Transaction()
+        transaction.addInstruction(transferInstruction)
+
+        // Sign and send the transaction
+        val signature: String = try {
+            this.connection.api.sendTransaction(transaction, senderAccount)
+        } catch (e: RpcException) {
+            throw IllegalStateException("Transaction failed: ${e.message}", e)
+        }
+
+        println("Transaction Signature: $signature")
+
+        return transaction
     }
 
     /**
@@ -80,13 +126,13 @@ class SolanaModule {
         secretKey: String,
         userPublicKey: String,
         mint: String
-    ): BigInteger {
+    ): BigDecimal {
 
         val mintAddress = PublicKey(mint)
 
 
         // 3. 공개 키 생성
-        val generateSolanaAccount = generateSolanaAccount(secretKey, "")
+        val generateSolanaAccount = getSolanaAccount(secretKey, "")
 
         // Select the correct program ID and lamports conversion based on the environment
         return try {
@@ -101,49 +147,60 @@ class SolanaModule {
             )
 
 
-            val amount = if(tokenAccount.second.compareTo(BigInteger.valueOf(0L))>=0){
-                tokenAccount.second.divide(BigInteger.valueOf(LAMPORTS_PER_SOL));
+            val amount = if(tokenAccount.second >= BigDecimal.valueOf(0L)){
+                tokenAccount.second.divide(BigDecimal.valueOf(LAMPORTS_PER_SOL));
             } else {
-                BigInteger.valueOf(0L)
+                BigDecimal.valueOf(0L)
             }
             println("tokenAccount.second  " + amount)
             return amount
         } catch (e: Exception) {
             println("Error fetching SPL token balance: ${e.message}")
-            return BigInteger.valueOf(0L)
+            return BigDecimal.valueOf(0L)
         }
 
     }
 
-    fun splTokenTransfer(request: SplTokenTransferDto): Transaction {
-        if (request.amount  < BigInteger.valueOf(0L)) {
+    /**
+     * SPL 토큰 전송 서비스
+     * @param secretKey String
+     * @param recipient String
+     * @param mint String
+     * @param amount BigInteger
+     * @return Transaction
+     */
+    fun splTokenTransfer(secretKey: String,
+                         recipient: String,
+                         mint: String,
+                         amount: BigDecimal): Transaction {
+        if (amount  < BigDecimal.valueOf(0L)) {
             throw IllegalArgumentException("Negative numbers are not allowed.")
         }
 
-        // Decode the secret key and create an Account
-        val senderKeypair = generateSolanaAccount(request.secretKey)
+        // 공개키 생성
+        val senderKeypair = getSolanaAccount(secretKey)
 
         // Fetch balance of the SPL Token account
         val balance = try {
             splTokenBalance(
-                request.secretKey,
+                secretKey,
                 senderKeypair.publicKey.toBase58(),
-                request.mint
+                mint
             )
         } catch (e: RpcException) {
             throw IllegalStateException("Error fetching SPL token balance: ${e.message}", e)
         }
 
         println("Balance: $balance")
-        println("Request amount: ${request.amount}")
+        println("Request amount: ${amount}")
 
-        if (balance < request.amount) {
+        if (balance < amount) {
             throw IllegalArgumentException("Insufficient balance")
         }
 
         // Create the transaction
         val transaction = Transaction()
-        val mintAddress = PublicKey(request.mint)
+        val mintAddress = PublicKey(mint)
         val senderAccount = getOrCreateAssociatedTokenAccount(
             senderKeypair,
             mintAddress,
@@ -157,24 +214,16 @@ class SolanaModule {
         val recipientAccount = getOrCreateAssociatedTokenAccount(
             senderKeypair,
             mintAddress,
-            PublicKey(request.recipient),
+            PublicKey(recipient),
             false,
             "comfirmd",
             TokenProgram.PROGRAM_ID
         )
 
-        // Add instruction to transfer SPL tokens
-        // val transferInstruction = TokenProgram.transfer(
-        //     mintAddress,
-        //     tokenAccount.first,
-        //     request.amount.toLong(),
-        //     senderKeypair.publicKey,
-        // )
-
         val transferInstruction = TokenProgram.transferChecked(
             senderAccount.first,
             recipientAccount.first,
-            request.amount.multiply(BigInteger.valueOf(LAMPORTS_PER_SOL)).toLong(),
+            amount.multiply(BigDecimal.valueOf(LAMPORTS_PER_SOL)).toLong(),
             9,
             senderKeypair.publicKey,
             mintAddress
@@ -194,16 +243,16 @@ class SolanaModule {
         return transaction
     }
 
-    // DTO class for request data
-    data class SplTokenTransferDto(
-        val secretKey: String,
-        val recipient: String,
-        val mint: String,
-        val amount: BigInteger
-    )
+    private fun calculateAmountByPerSol(amount :BigDecimal) : BigDecimal{
+        return if(amount.compareTo(BigDecimal.valueOf(0L))<=0){
+            BigDecimal.valueOf(0L)
+        }else{
+            amount.multiply(BigDecimal.valueOf(LAMPORTS_PER_SOL))
+        }
+    }
 
     /**
-     *
+     * 토큰 지갑정보를 가져오고, 만약에 존재하지 않으면 토큰 주소를 생성한다.
      * @param payer Account - 지불 계정
      * @param mint PublicKey - 민트 주소
      * @param owner PublicKey - 토큰 오너 주소
@@ -219,7 +268,7 @@ class SolanaModule {
         allowOwnerOffCurve: Boolean = false,
         commitment: String = "confirmed",
         programId: PublicKey = TokenProgram.PROGRAM_ID
-    ): Pair<PublicKey, BigInteger> {
+    ): Pair<PublicKey, BigDecimal> {
 
         // Calculate the associated token account (ATA) address
         val associatedTokenAddress = PublicKey.findProgramAddress(
@@ -237,7 +286,7 @@ class SolanaModule {
         if (accountInfo.value != null) {
             // Fetch balance if ATA exists
             val tokenBalance = this.connection.api.getTokenAccountBalance(associatedTokenAddress.address)
-            return Pair(associatedTokenAddress.address, BigInteger(tokenBalance.amount))
+            return Pair(associatedTokenAddress.address, BigDecimal(tokenBalance.amount))
 
         }
 
@@ -254,15 +303,20 @@ class SolanaModule {
             println(e.message)
         }
 
-        return Pair(associatedTokenAddress.address, BigInteger.ZERO)
+        return Pair(associatedTokenAddress.address, BigDecimal.ZERO)
     }
 
     companion object {
         private const val LAMPORTS_PER_SOL = 1_000_000_000L // 1 SOL = 1 billion lamports
     }
 
-
-    private fun generateSolanaAccount(mnemonic: String, passphrase: String = ""): Account {
+    /**
+     * mnemonic을 분해하여 계정을 만든다
+     * @param mnemonic String 니모닉 주소
+     * @param passphrase String 비밀번호
+     * @return Account mnemonic에 따른 계정 정보
+     */
+    private fun getSolanaAccount(mnemonic: String, passphrase: String = ""): Account {
 
         val seed = MnemonicUtils.generateSeed(mnemonic, "")
 
