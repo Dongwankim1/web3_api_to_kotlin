@@ -3,6 +3,7 @@
  */
 package org.example
 
+import com.squareup.moshi.Moshi
 import org.bitcoinj.core.Base58
 import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters
 import org.p2p.solanaj.core.Account
@@ -14,6 +15,7 @@ import org.p2p.solanaj.programs.SystemProgram
 import org.p2p.solanaj.programs.TokenProgram
 import org.p2p.solanaj.rpc.RpcClient
 import org.p2p.solanaj.rpc.RpcException
+import org.p2p.solanaj.rpc.types.RpcRequest
 import org.web3j.crypto.MnemonicUtils
 import java.math.BigDecimal
 
@@ -249,6 +251,56 @@ class SolanaModule {
         }else{
             amount.multiply(BigDecimal.valueOf(LAMPORTS_PER_SOL))
         }
+    }
+
+    fun mintNft(secretKey: String, collection: String, candyMachine: String, candyGuard: String){
+        try {
+            val decodedKey = Base58.decode(secretKey)
+            val account = Account(decodedKey)
+
+            // 공개키 생성
+            val senderKeypair = getSolanaAccount(secretKey)
+
+            val nftMint = Account() // 새 NFT 민팅을 위한 새로운 Keypair 생성
+
+            val mintRequest = buildMintTransaction(
+                account,
+                nftMint,
+                collection,
+                candyMachine,
+                candyGuard
+            )
+
+            val result = this.connection.call(mintRequest.method,mintRequest.params, Moshi::class.java)
+
+
+        } catch (e: Exception) {
+            println("Error minting NFT: ${e.message}")
+        }
+    }
+
+    private fun buildMintTransaction(
+        payer: Account,
+        nftMint: Account,
+        collection: String,
+        candyMachine: String,
+        candyGuard: String
+    ): RpcRequest {
+        val mintArgs = mapOf("solPayment" to mapOf("destination" to payer.publicKey.toBase58()))
+
+        return RpcRequest(
+            "mintV2",
+            listOf(
+                mapOf(
+                    "collectionMint" to collection,
+                    "candyMachine" to candyMachine,
+                    "candyGuard" to candyGuard,
+                    "nftMint" to nftMint.publicKey.toBase58(),
+                    "collectionUpdateAuthority" to payer.publicKey.toBase58(),
+                    "mintArgs" to mintArgs
+                )
+            )
+        )
     }
 
     /**
