@@ -131,7 +131,7 @@ class SolanaModule {
     ): BigDecimal {
 
         val mintAddress = PublicKey(mint)
-        ///
+        //커스텀 토큰프로그램 어떻게하냐고고고오오오오
 
         // 3. 공개 키 생성
         val generateSolanaAccount = getSolanaAccount(secretKey, "")
