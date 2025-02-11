@@ -252,7 +252,56 @@ class SolanaModule {
             amount.multiply(BigDecimal.valueOf(LAMPORTS_PER_SOL))
         }
     }
+    fun mintNft(){
+        try {
+            // Solana 네트워크 클라이언트 설정ㅂㅈㄱㅂㅈㄱ
+            val client = RpcClient("https://api.devnet.solana.com")
 
+            // 각 파라미터를 PublicKey 객체로 변환
+            val collectionMint = PublicKey(get)
+            val candyMachine = PublicKey(request.candyMachine)
+            val candyGuard = PublicKey(request.candyGuard)
+            val nftMint = Account() // 새로운 NFT Mint 계정 생성
+            val collectionUpdateAuthority = keypair.publicKey
+
+            // 트랜잭션 생성
+            val transaction = Transaction()
+
+            // Candy Machine과 Candy Guard를 사용한 NFT 민팅 트랜잭션 추가
+            transaction.addInstruction(
+                TransactionInstruction(
+                    PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"), // Metaplex Program ID
+                    listOf(
+                        collectionMint,  // 컬렉션 NFT 주소
+                        candyMachine,    // Candy Machine ID
+                        candyGuard,      // Candy Guard ID
+                        nftMint.publicKey,  // 새로 민팅할 NFT 주소
+                        collectionUpdateAuthority  // 컬렉션 업데이트 권한자
+                    ),
+                    "mintV2".toByteArray() // `mintV2` RPC 호출
+                )
+            )
+
+            // SOL 결제 (Minting 비용 전송)
+            transaction.addInstruction(
+                SystemProgram.transfer(
+                    keypair.publicKey,
+                    PublicKey("YOUR_DESTINATION_ADDRESS"), // 결제 수신 주소
+                    1_000_000 // 0.001 SOL (테스트용)
+                )
+            )
+
+            // 트랜잭션 서명 및 전송
+            transaction.sign(keypair)
+            val signature = client.api.sendTransaction(transaction)
+
+            println("NFT Mint Transaction Signature: $signature")
+            return signature
+        } catch (e: RpcException) {
+            println("Error: ${e.message}")
+            throw e
+        }
+    }
     fun mintNft(secretKey: String, collection: String, candyMachine: String, candyGuard: String){
         try {
             val decodedKey = Base58.decode(secretKey)
