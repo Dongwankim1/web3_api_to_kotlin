@@ -1,10 +1,5 @@
 package app.saferoadclub.domain.solana
 
-import app.saferoadclub.domain.common.CodeEnum
-import app.saferoadclub.domain.systemConfig.service.SystemConfigService
-import app.saferoadclub.util.EnvironmentUtil
-import app.saferoadclub.util.LogUtil.logger
-import com.fasterxml.jackson.annotation.JsonAlias
 import org.bitcoinj.core.Base58
 import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters
 import org.example.TOKENPROGRAM2022
@@ -17,268 +12,191 @@ import org.p2p.solanaj.programs.SystemProgram
 import org.p2p.solanaj.programs.TokenProgram
 import org.p2p.solanaj.rpc.RpcClient
 import org.p2p.solanaj.rpc.RpcException
-import org.springframework.stereotype.Service
 import org.web3j.crypto.MnemonicUtils
 import java.math.BigDecimal
 
 /**
- *packageName    : app.saferoadclub.domain.solana
- * fileName       : SolanaService
- * author         : mac
- * date           : 2/10/25
- * description    :
- * ===========================================================
- * DATE              AUTHOR             NOTE
- * -----------------------------------------------------------
- * 2/10/25        mac       최초 생성
+ * Standalone SolanaTransferService (한글 주석 버전)
+ * - Spring, SystemConfigService, EnvironmentUtil 의존성 제거
+ * - 아래 상수만 설정하면 바로 사용 가능
  */
+class SolanaTransferService {
 
-class SolanaTransferService(
-    private val systemConfigService: SystemConfigService,
-    private val environmentUtil: EnvironmentUtil
-) {
-    private final val TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-    private final val TOKEN_2022_PROGRAM_ID = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+    // =====================[ 여기를 프로젝트에 맞게 설정하세요 ]=====================
 
-    private fun getWalletPrivateKey(): String {
-        return systemConfigService.getValue(CodeEnum.SystemConfigKey.WEB3_SOLANA_WALLET_PRIVATE_KEY)
-    }
+    /** Solana RPC 엔드포인트 (Devnet 예시) */
+    private val RPC_ENDPOINT: String = "https://api.devnet.solana.com"
 
-    private fun getSrcTokenAddress(): String {
-        return systemConfigService.getValue(CodeEnum.SystemConfigKey.WEB3_SOLANA_TOKEN_SRC_ADDRESS)
-    }
+    /**
+     * Base58 인코딩된 지갑 비밀키(64바이트 키페어)
+     *  - 절대 레포에 커밋하지 마세요. 운영에서는 환경변수/시크릿 매니저 사용 권장
+     */
+    private val WALLET_SECRET_BASE58: String =
+        "3s1pLeBAsE58SEcREtKeYPUT_yours_here_DO_NOT_COMMIT"
 
-    private fun getMintCollection(): String {
-        return systemConfigService.getValue(CodeEnum.SystemConfigKey.WEB3_SOLANA_MINT_COLLECTION_ADDRESS)
-    }
+    /** 작업할 SPL 토큰의 Mint 주소 (예시) */
+    private val SRC_TOKEN_MINT: String = "E3iTukHHrabJ1f3mW8rKRZV6Y4PKMzoLD1HmN8gNGpgt"
 
-    private fun getMintCandyMachine(): String {
-        return systemConfigService.getValue(CodeEnum.SystemConfigKey.WEB3_SOLANA_MINT_CANDYMACHINE_ADDRESS)
-    }
+    /** 환경 플래그: true=운영(TokenProgram), false=개발(Token-2022) */
+    private val IS_PROD: Boolean = false
 
-    private fun getMintCandyGuard(): String {
-        return systemConfigService.getValue(CodeEnum.SystemConfigKey.WEB3_SOLANA_MINT_CANDYGUARD_ADDRESS)
-    }
+    /** 토큰 Decimals (예시: 운영 8, 개발 9) → 실제 Mint의 Decimals에 맞춰 수정 */
+    private val PROD_TOKEN_DECIMALS: Int = 8
+    private val DEV_TOKEN_DECIMALS: Int = 9
 
-    private fun getRpcEndpoint(): String {
-        return systemConfigService.getValue(CodeEnum.SystemConfigKey.WEB3_SOLANA_RPC_URL)
-    }
+    // ============================================================================
 
+    /** 표준 SPL Token Program ID */
+    private val TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+
+    /** Token-2022 Program ID */
+    private val TOKEN_2022_PROGRAM_ID = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+
+    /** 설정값 Getter */
+    private fun getWalletPrivateKeyBase58(): String = WALLET_SECRET_BASE58
+    private fun getSrcTokenAddress(): String = SRC_TOKEN_MINT
+    private fun getRpcEndpoint(): String = RPC_ENDPOINT
+
+    /** 환경에 따라 사용할 프로그램 선택 */
     private fun getTokenProgram(): PublicKey {
-        return if(environmentUtil.isProd()){
-            PublicKey(TOKEN_PROGRAM_ID)
-        }else{
-            PublicKey(TOKEN_2022_PROGRAM_ID)
-        }
+        return if (IS_PROD) PublicKey(TOKEN_PROGRAM_ID) else PublicKey(TOKEN_2022_PROGRAM_ID)
+    }
+
+    /** 환경에 따라 사용할 Decimals 선택 */
+    private fun getTokenDecimals(): Int {
+        return if (IS_PROD) PROD_TOKEN_DECIMALS else DEV_TOKEN_DECIMALS
     }
 
     /**
-     * 솔라나 계정 금액을 가져온다.
-     * @param publicKey String 공개키
-     * @return BigIn
+     * 계정의 SOL 잔액 조회
+     * @param publicKey 공개키(Base58)
+     * @return SOL 단위의 잔액 (BigDecimal)
      */
     fun getSolanaBalance(publicKey: String): BigDecimal {
-        println("getBalance")
-
         return try {
             val lamports = getConnection().api.getBalance(PublicKey(publicKey))
             BigDecimal(lamports).divide(BigDecimal(LAMPORTS_PER_SOL))
         } catch (e: Exception) {
-            println("Error fetching balance: ${e.message}")
-            BigDecimal.valueOf(0L)
+            println("SOL 잔액 조회 실패: ${e.message}")
+            BigDecimal.ZERO
         }
     }
+
     /**
-     * 현재 토큰 밸런스 가져오기
-     * @param userPublicKey String - 조회할 사용자 지갑주소
-     * @return Double
+     * 사용자 지갑의 SPL 토큰 잔액 조회
+     * - 필요한 경우 ATA를 조회/생성
+     * @param userPublicKey 사용자 공개키(Base58)
+     * @return 토큰 단위의 잔액 (Decimals 반영됨)
      */
     fun getSplBalance(userPublicKey: String): BigDecimal {
-        val secretKey = getWalletPrivateKey() // 민팅 owner 시크릿키 (payer)
-        val mint = getSrcTokenAddress() // mint String - 민팅 주소
-
-        val mintAddress = PublicKey(mint)
-
-
-        // 3. 공개 키 생성
-        // val generateSolanaAccount = getSolanaAccount(secretKey, "")
-
-        // Select the correct program ID and lamports conversion based on the environment
+        val mintAddress = PublicKey(getSrcTokenAddress())
         return try {
-            // Find or create the associated token account
             val tokenAccount = getOrCreateAssociatedTokenAccount(
-                mintAddress,
-                PublicKey(userPublicKey),
-                false,
-                "comfirmd",
-                getTokenProgram()
+                mint = mintAddress,
+                owner = PublicKey(userPublicKey),
+                programId = getTokenProgram()
             )
-
-
-            val amount = if(tokenAccount.second >= BigDecimal.valueOf(0L)){
-                if (environmentUtil.isProd()){
-                    tokenAccount.second.divide(BigDecimal.valueOf(PROD_LAMPORTS_PER_SOL));
-                }else{
-                    tokenAccount.second.divide(BigDecimal.valueOf(LAMPORTS_PER_SOL));
-                }
-            } else {
-                BigDecimal.valueOf(0L)
-            }
-            return amount
+            // on-chain 금액은 소수점 없는 정수(최소 단위) → Decimals로 나눠 사람이 읽기 좋은 단위로 변환
+            val decimals = getTokenDecimals()
+            val divisor = BigDecimal.TEN.pow(decimals)
+            tokenAccount.second.divide(divisor)
         } catch (e: Exception) {
-            return BigDecimal.valueOf(0L)
+            println("SPL 잔액 조회 실패: ${e.message}")
+            BigDecimal.ZERO
         }
     }
 
     /**
-     * sol 토큰 전송
-     * dev - Token2022Program으로 생성됨
-     * prod - TokenProgram으로 생성됨
-     * @param recipientPublicKey String 토큰을 받을 계쩡
-     * @param amount BigDecimal 토큰 전송 양
-     * @return TransferTokenResponse
+     * SPL 토큰 전송 (필요 시 수신자 ATA 자동 생성)
+     * @param recipientPublicKey 수신자 공개키(Base58)
+     * @param amount 전송 수량 (토큰 단위)
      */
-    fun transferSpl(recipientPublicKey: String,amount:BigDecimal): TransferTokenResponse {
-        if (amount  < BigDecimal.valueOf(0L)) {
-            throw IllegalArgumentException("Negative numbers are not allowed.")
-        }
-        // 공개키 생성
-        val senderKeypair = getAccountBySecretKey(getWalletPrivateKey())
+    fun transferSpl(recipientPublicKey: String, amount: BigDecimal): TransferTokenResponse {
+        require(amount >= BigDecimal.ZERO) { "음수 전송은 허용되지 않습니다." }
 
-        val mint = getSrcTokenAddress()
+        // 송신자 계정
+        val sender = getAccountBySecretKey(getWalletPrivateKeyBase58())
 
-        // Fetch balance of the SPL Token account
-        val balance = try {
-            getSplBalance(
-                senderKeypair.publicKeyBase58
+        // 잔액 확인(토큰 단위)
+        val senderBalance = getSplBalance(sender.publicKeyBase58)
+        if (senderBalance < amount) throw IllegalArgumentException("토큰 잔액 부족")
+
+        // ATA 확보 (없으면 생성)
+        val mintAddress = PublicKey(getSrcTokenAddress())
+        val senderAta = getOrCreateAssociatedTokenAccount(mintAddress, sender.publicKey, programId = getTokenProgram())
+        val recipientAta = getOrCreateAssociatedTokenAccount(mintAddress, PublicKey(recipientPublicKey), programId = getTokenProgram())
+
+        // 전송 금액을 on-chain 최소 단위(정수)로 변환
+        val decimals = getTokenDecimals()
+        val rawAmount = amount.multiply(BigDecimal.TEN.pow(decimals)).toLong()
+
+        // 환경별 프로그램으로 transferChecked 인스트럭션 생성
+        val tx = Transaction()
+        val ix: TransactionInstruction = if (IS_PROD) {
+            TokenProgram.transferChecked(
+                senderAta.first,
+                recipientAta.first,
+                rawAmount,
+                decimals.toByte(),
+                sender.publicKey,
+                mintAddress
             )
+        } else {
+            TOKENPROGRAM2022.transferChecked(
+                senderAta.first,
+                recipientAta.first,
+                rawAmount,
+                decimals.toByte(),
+                sender.publicKey,
+                mintAddress
+            )
+        }
+        tx.addInstruction(ix)
+
+        // 전송 + 재시도/확정 확인
+        val sig = try {
+            sendAndConfirmTransactionWithRetry(tx, sender, maxRetries = 10)
         } catch (e: RpcException) {
-            throw IllegalStateException("Error fetching SPL token balance: ${e.message}", e)
-        }
-        val connection = getConnection()
-        println("Balance: $balance")
-        println("Request amount: ${amount}")
-
-        if (balance < amount) {
-            throw IllegalArgumentException("Insufficient balance")
+            throw IllegalStateException("SPL 전송 실패: ${e.message}", e)
         }
 
-        // Create the transaction
-        // val transaction = Transaction()
-        val mintAddress = PublicKey(mint)
-        val senderAccount = getOrCreateAssociatedTokenAccount(
-            mintAddress,
-            senderKeypair.publicKey,
-            false,
-            "comfirmd",
-            getTokenProgram()
-        )
+        println("SPL 전송 완료: $sig")
+        return TransferTokenResponse(sig)
+    }
 
-        val recipientAccount = getOrCreateAssociatedTokenAccount(
-            mintAddress,
+    /**
+     * SOL 전송
+     * @param recipientPublicKey 수신자 공개키(Base58)
+     * @param amount 전송 수량 (SOL 단위)
+     */
+    fun transferSolana(recipientPublicKey: String, amount: BigDecimal): TransferTokenResponse {
+        require(amount >= BigDecimal.ZERO) { "음수 전송은 허용되지 않습니다." }
+
+        val sender = getAccountBySecretKey(getWalletPrivateKeyBase58())
+        val balance = getSolanaBalance(sender.publicKeyBase58)
+        if (balance < amount) throw IllegalArgumentException("SOL 잔액 부족")
+
+        // SOL → Lamports 변환 후 전송
+        val transferIx = SystemProgram.transfer(
+            sender.publicKey,
             PublicKey(recipientPublicKey),
-            false,
-            "comfirmd",
-            getTokenProgram()
+            amount.multiply(BigDecimal(LAMPORTS_PER_SOL)).toLong()
         )
+        val tx = Transaction().apply { addInstruction(transferIx) }
 
-        val transaction = Transaction()
-        var transferInstruction: TransactionInstruction? = null;
-        println("senderAccount : "+senderAccount)
-        println("recipientAccount : "+recipientAccount)
-        println(" amount.multiply : "+amount.multiply(BigDecimal.valueOf(PROD_LAMPORTS_PER_SOL)).toLong())
-
-        if (environmentUtil.isProd()){
-             println("prod senderAccount : "+senderAccount.first)
-             println("prod recipientAccount : "+recipientAccount.first)
-            
-            transferInstruction = TokenProgram.transferChecked(
-                senderAccount.first,
-                recipientAccount.first,
-                amount.multiply(BigDecimal.valueOf(PROD_LAMPORTS_PER_SOL)).toLong(),
-                8,
-                senderKeypair.publicKey,
-                mintAddress
-            )
-            println("prod transferInstruction : "+transferInstruction)
-        }else{
-            transferInstruction = TOKENPROGRAM2022.transferChecked(
-                senderAccount.first,
-                recipientAccount.first,
-                amount.multiply(BigDecimal.valueOf(LAMPORTS_PER_SOL)).toLong(),
-                9,
-                senderKeypair.publicKey,
-                mintAddress
-            )
-        }
-
-        transaction.addInstruction(transferInstruction)
-        
-        // // Sign and send the transaction
-        val signature: String = try {
-            sendAndConfirmTransactionWithRetry(transaction, senderKeypair,10)
-            //getConnection().api.sendTransaction(transaction, senderKeypair)
+        val sig = try {
+            getConnection().api.sendTransaction(tx, sender)
         } catch (e: RpcException) {
-            throw IllegalStateException("Transaction failed: ${e.message}", e)
+            throw IllegalStateException("SOL 전송 실패: ${e.message}", e)
         }
 
-        println("Transaction Signature: $signature")
-        val result = TransferTokenResponse(signature)
-        return result
+        println("SOL 전송 완료: $sig")
+        return TransferTokenResponse(sig)
     }
 
     /**
-     * 솔라나를 전송한다.
-     * @param recipient String 받는 사람 퍼블릭키 주소
-     * @param amount BigInteger 보내는 양
-     */
-    fun transferSolana(recipientPublicKey: String,
-                       amount: BigDecimal) :TransferTokenResponse{
-        if (amount  < BigDecimal.valueOf(0L)) {
-            throw IllegalArgumentException("Negative numbers are not allowed.")
-        }
-
-        // 공개키 생성
-        val senderAccount = getAccountBySecretKey(getWalletPrivateKey())
-        // 솔라나 계정 금액 가져오기
-        val balance = getSolanaBalance(senderAccount.publicKeyBase58)
-
-        if (balance < amount) {
-            throw IllegalArgumentException("Insufficient balance")
-        }
-
-        val recipientPublicKey = PublicKey(recipientPublicKey)
-
-        val transferInstruction = SystemProgram.transfer(
-            senderAccount.getPublicKey(),
-            recipientPublicKey,
-            calculateAmountByPerSol(amount).toLong()
-        )
-        val transaction = Transaction()
-        transaction.addInstruction(transferInstruction)
-
-        // Sign and send the transaction
-        val signature: String = try {
-            getConnection().api.sendTransaction(transaction, senderAccount)
-        } catch (e: RpcException) {
-            throw IllegalStateException("Transaction failed: ${e.message}", e)
-        }
-
-        println("Transaction Signature: $signature")
-        val result = TransferTokenResponse(signature)
-        return result
-    }
-
-
-    /**
-     * 토큰 지갑정보를 가져오고, 만약에 존재하지 않으면 토큰 주소를 생성한다.
-     * @param payer Account - 지불 계정
-     * @param mint PublicKey - 민트 주소
-     * @param owner PublicKey - 토큰 오너 주소
-     * @param allowOwnerOffCurve Boolean
-     * @param commitment String
-     * @param programId PublicKey
-     * @return Pair<PublicKey, BigInteger>
+     * ATA 조회/생성
+     * @return Pair(ATA 주소, 잔액(최소 단위 정수))
      */
     fun getOrCreateAssociatedTokenAccount(
         mint: PublicKey,
@@ -288,7 +206,8 @@ class SolanaTransferService(
         programId: PublicKey
     ): Pair<PublicKey, BigDecimal> {
         val connection = getConnection()
-        // Calculate the associated token account (ATA) address
+
+        // ATA 주소 계산 (owner + tokenProgram + mint)
         val associatedTokenAddress = PublicKey.findProgramAddress(
             listOf(
                 owner.toByteArray(),
@@ -296,159 +215,112 @@ class SolanaTransferService(
                 mint.toByteArray()
             ),
             AssociatedTokenProgram.PROGRAM_ID
-        )
-        println("associatedTokenAddress : " + associatedTokenAddress.address)
-        // Check if the ATA exists
-        val accountInfo = connection.api.getSplTokenAccountInfo(associatedTokenAddress.address)
-        // val accountInfo = connection.api.getAccountInfo(associatedTokenAddress.address)
-        //
+        ).address
+
+        // 존재하면 잔액 반환
+        val accountInfo = connection.api.getSplTokenAccountInfo(associatedTokenAddress)
         if (accountInfo.value != null) {
-            println("accountInfo = " + accountInfo);
-            println("accountInfo.value = " + accountInfo.value);
-            // Fetch balance if ATA exists
-            val tokenBalance = connection.api.getTokenAccountBalance(associatedTokenAddress.address)
-            return Pair(associatedTokenAddress.address, BigDecimal(tokenBalance.amount))
-
+            val tokenBalance = connection.api.getTokenAccountBalance(associatedTokenAddress)
+            return Pair(associatedTokenAddress, BigDecimal(tokenBalance.amount))
         }
 
-        val senderKeypair = getAccountBySecretKey(getWalletPrivateKey())
-
-        // If ATA doesn't exist, create it
-        val transaction = Transaction()
-        val create = AssociatedTokenProgram.createIdempotent(senderKeypair.publicKey, owner, mint)
-        transaction.addInstruction(
-            create
-        )
-
+        // 없으면 idempotent 생성
+        val payer = getAccountBySecretKey(getWalletPrivateKeyBase58())
+        val tx = Transaction().apply {
+            addInstruction(AssociatedTokenProgram.createIdempotent(payer.publicKey, owner, mint))
+        }
         try {
-            //val signature: String = sendAndConfirmTransactionWithRetry(transaction,senderKeypair,5)
-            val signature: String = connection.api.sendTransaction(transaction, senderKeypair)
-
-        }catch (e: RpcException){
-            println(e.message)
+            connection.api.sendTransaction(tx, payer)
+        } catch (e: RpcException) {
+            // 이미 존재하는 경우 등은 실패 로그만 남기고 계속 진행
+            println("ATA 생성 실패(이미 존재 가능): ${e.message}")
         }
-        println("create token : " + create)
 
-        return Pair(associatedTokenAddress.address, BigDecimal.ZERO)
+        return Pair(associatedTokenAddress, BigDecimal.ZERO)
     }
 
-    private fun getAccountBySecretKey(secretKey: String): Account {
-        val secretKeyBytes: ByteArray = Base58.decode(secretKey)
-        val senderKeypair = Account(secretKeyBytes)
-        return senderKeypair
+    // =====================[ 계정/유틸 ]=====================
+
+    /** Base58 비밀키로 Account 생성 */
+    private fun getAccountBySecretKey(secretKeyBase58: String): Account {
+        val sk = Base58.decode(secretKeyBase58)
+        return Account(sk)
     }
 
-    /**
-     * mnemonic을 분해하여 계정을 만든다
-     * @param mnemonic String 니모닉 주소
-     * @param passphrase String 비밀번호
-     * @return Account mnemonic에 따른 계정 정보
-     */
-    private fun getSolanaAccount(mnemonic: String, passphrase: String = ""): Account {
-
-        val seed = MnemonicUtils.generateSeed(mnemonic, "")
-
-        // 2. Ed25519 비밀 키 생성 (상위 32바이트)
+    /** (옵션) 니모닉으로 Account 생성 */
+    @Suppress("unused")
+    private fun getSolanaAccountFromMnemonic(mnemonic: String, passphrase: String = ""): Account {
+        val seed = MnemonicUtils.generateSeed(mnemonic, passphrase)
         val privateKey = seed.copyOf(32)
         val privateKeyParams = Ed25519PrivateKeyParameters(privateKey, 0)
-
-        // 3. 공개 키 생성
         val publicKey = privateKeyParams.generatePublicKey().encoded
-
-        // 4. Solana Account 생성
         return Account(privateKey + publicKey)
     }
 
-    private fun calculateAmountByPerSol(amount :BigDecimal) : BigDecimal{
-        return if(amount.compareTo(BigDecimal.valueOf(0L))<=0){
-            BigDecimal.valueOf(0L)
-        }else{
-            amount.multiply(BigDecimal.valueOf(LAMPORTS_PER_SOL))
-        }
-    }
+    // =====================[ 신뢰성: 재시도/확정 ]=====================
 
-/**
- * 트랜잭션 전송 후 최종 확정 여부를 재검증하고, 재시도하는 메서드 예시
- *
- * @param transaction 전송할 트랜잭션 객체
- * @param senderKeypair 전송에 사용할 계정 객체
- * @param maxRetries 최대 재시도 횟수 (기본값: 3)
- * @return 최종 확정된 트랜잭션의 서명
- * @throws IllegalStateException 모든 시도에서 최종 확정되지 않은 경우
- */
-fun sendAndConfirmTransactionWithRetry(
-    transaction: Transaction,
-    senderKeypair: Account,
-    maxRetries: Int = 3
-): String {
-    val connection = getConnection()
-    var attempt = 0
-    var signature: String? = null
+    /**
+     * 트랜잭션 전송 후 finalized 확정까지 재시도
+     */
+    fun sendAndConfirmTransactionWithRetry(
+        transaction: Transaction,
+        senderKeypair: Account,
+        maxRetries: Int = 3
+    ): String {
+        val connection = getConnection()
+        var attempt = 0
+        var signature: String? = null
 
-    while (attempt < maxRetries) {
-        try {
-            // 트랜잭션 전송
-            signature = connection.api.sendTransaction(transaction, senderKeypair)
-            println("Transaction sent on attempt ${attempt + 1} with signature: $signature")
-        } catch (e: RpcException) {
-            println("Transaction sending failed on attempt ${attempt + 1}: ${e.message}")
+        while (attempt < maxRetries) {
+            try {
+                signature = connection.api.sendTransaction(transaction, senderKeypair)
+                println("전송 시도 ${attempt + 1}회: $signature")
+            } catch (e: RpcException) {
+                println("전송 실패 ${attempt + 1}회: ${e.message}")
+            }
+
+            if (signature != null && waitForTransactionConfirmation(signature)) {
+                println("finalized 확정 (시도 ${attempt + 1}회)")
+                return signature
+            }
+
+            attempt++
+            Thread.sleep(1000) // 재시도 대기
         }
 
-        // 전송한 트랜잭션의 최종 확정 여부 확인
-        if (signature != null && waitForTransactionConfirmation(signature)) {
-            println("Transaction confirmed as finalized on attempt ${attempt + 1}")
-            return signature
+        throw IllegalStateException("모든 재시도 후에도 finalized 되지 않았습니다. (maxRetries=$maxRetries)")
+    }
+
+    /**
+     * 시그니처가 finalized 될 때까지 폴링
+     */
+    private fun waitForTransactionConfirmation(
+        signature: String,
+        timeoutMillis: Long = 8000,
+        intervalMillis: Long = 500
+    ): Boolean {
+        val connection = getConnection()
+        val start = System.currentTimeMillis()
+        while (System.currentTimeMillis() - start < timeoutMillis) {
+            val statuses = connection.api.getSignatureStatuses(listOf(signature), false)
+            if (statuses.value.isNotEmpty() &&
+                statuses.value[0]?.confirmationStatus == "finalized"
+            ) {
+                return true
+            }
+            Thread.sleep(intervalMillis)
         }
-
-        attempt++
-        println("Retrying transaction... (attempt ${attempt + 1})")
-        Thread.sleep(1000) // 재시도 전 잠깐 대기
+        return false
     }
 
-    throw IllegalStateException("Transaction not confirmed after $maxRetries attempts.")
-}
-
-/**
- * 주어진 트랜잭션 서명이 네트워크에서 최종 확정(finalized) 상태가 될 때까지 대기하는 메서드
- *
- * @param signature 트랜잭션 서명
- * @param timeoutMillis 최대 대기 시간 (기본값: 15000ms)
- * @param intervalMillis 조회 간격 (기본값: 500ms)
- * @return 트랜잭션이 최종 확정되면 true, 그렇지 않으면 false
- */
-private fun waitForTransactionConfirmation(
-    signature: String,
-    timeoutMillis: Long = 8000,
-    intervalMillis: Long = 500
-): Boolean {
-    val connection = getConnection()
-    val startTime = System.currentTimeMillis()
-    while (System.currentTimeMillis() - startTime < timeoutMillis) {
-        val statuses = connection.api.getSignatureStatuses(listOf(signature),false)
-        if (statuses.value.isNotEmpty() && statuses.value[0] != null &&
-            statuses.value[0]!!.confirmationStatus == "finalized"
-        ) {
-            println("Transaction $signature confirmed as finalized.")
-            return true
-        }
-        Thread.sleep(intervalMillis)
-    }
-    println("Timeout reached. Transaction $signature not finalized.")
-    return false
-}
-    
-    private fun getConnection(): RpcClient {
-        return RpcClient(getRpcEndpoint())
-    }
+    /** RPC 연결 */
+    private fun getConnection(): RpcClient = RpcClient(getRpcEndpoint())
 
     companion object {
-        private const val LAMPORTS_PER_SOL = 1_000_000_000L // 1 SOL = 1 billion lamports
-        private const val PROD_LAMPORTS_PER_SOL = 100_000_000L // 1 SOL = 1 billion lamports
+        /** 1 SOL = 1_000_000_000 lamports */
+        private const val LAMPORTS_PER_SOL = 1_000_000_000L
     }
 
-    data class TransferTokenResponse(
-        @JsonAlias("tx")
-        val tx: String,
-    )
-
+    /** 트랜잭션 결과 */
+    data class TransferTokenResponse(val tx: String)
 }

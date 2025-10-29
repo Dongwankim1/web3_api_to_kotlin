@@ -1,197 +1,199 @@
-Safe Road Club — Solana Kotlin Backend Integration
+# 🚀 Safe Road Club — Solana Kotlin Backend Integration
 
-Server-side (Spring Boot) Solana transaction module ported from Web3.js to Kotlin (Solanaj).
-It handles SPL token transfers, Associated Token Account (ATA) creation, balance queries, environment-aware Token Program switching, and retry + finalization checks for reliability.
+**Web3.js → Kotlin(Solanaj)** 포팅을 통해 **서버 사이드(Spring Boot)** 에서  
+Solana 트랜잭션 생성 · 서명 · 전송까지 수행하는 백엔드 모듈입니다.  
+SPL 토큰 전송, Associated Token Account(ATA) 자동 생성, 트랜잭션 재확인/재시도,  
+환경별(TokenProgram/Token2022) 분기 기능을 포함합니다.
 
-Why this exists
+---
 
-Run on-chain operations from the backend (create/sign/send) without a web client.
+## ⚡ 핵심 요약
 
-Auto-switch between TokenProgram (prod) and Token-2022 (dev).
+- ✅ 프론트 의존(Web3 클라이언트) 없이 **백엔드 단독**으로 안정적인 온체인 처리
+- 🌿 dev/prod 환경별 프로그램 전환: `TokenProgram(prod)`, `Token2022(dev)`
+- 🔁 재시도 + 최종 확정(`finalized`) 확인으로 트랜잭션 신뢰성 강화
+- 💰 ATA 자동 생성 및 SPL/SOL 잔액 조회 지원
 
-Improve reliability via retry + finalized status polling.
+---
 
-Auto-create ATAs and provide SOL/SPL balance helpers.
+## 📦 모듈 구성
 
-📦 Module Structure
 app.saferoadclub.domain.solana/
 ├─ SolanaTransferService.kt
-└─ TOKENPROGRAM2022.java   // Token-2022 Program wrapper
+└─ TOKENPROGRAM2022.java // Token-2022 전용 Program wrapper
 
+markdown
+코드 복사
 
-SolanaTransferService
+### 🧩 SolanaTransferService
 
-getSolanaBalance(publicKey: String): BigDecimal
+| 메서드 | 설명 |
+|--------|------|
+| `getSolanaBalance(publicKey: String): BigDecimal` | SOL 잔액 조회 |
+| `getSplBalance(userPublicKey: String): BigDecimal` | SPL 잔액 조회 |
+| `transferSolana(recipientPublicKey: String, amount: BigDecimal): TransferTokenResponse` | SOL 전송 |
+| `transferSpl(recipientPublicKey: String, amount: BigDecimal): TransferTokenResponse` | SPL 전송 |
+| `getOrCreateAssociatedTokenAccount(mint, owner, ...): Pair<PublicKey, BigDecimal>` | ATA 생성/조회 |
+| (내부) `sendAndConfirmTransactionWithRetry(...)`, `waitForTransactionConfirmation(...)` | 트랜잭션 재시도 / 확정 |
 
-getSplBalance(userPublicKey: String): BigDecimal
+### 🧱 TOKENPROGRAM2022
 
-transferSolana(recipientPublicKey: String, amount: BigDecimal): TransferTokenResponse
+Token-2022 프로그램용 Instruction 생성 유틸  
+(예: `transferChecked`, `mintTo`, `burn` 등)
 
-transferSpl(recipientPublicKey: String, amount: BigDecimal): TransferTokenResponse
+---
 
-getOrCreateAssociatedTokenAccount(mint, owner, ...): Pair<PublicKey, BigDecimal>
+## 🔧 의존성
 
-Internal: sendAndConfirmTransactionWithRetry(...), waitForTransactionConfirmation(...)
+- Kotlin, Spring Boot
+- [solanaj](https://github.com/skynetcapital/solanaj) (Solana Java/Kotlin SDK)
+- bitcoinj (Base58), BouncyCastle (Ed25519), web3j (Mnemonic)
+- PostgreSQL/JPA (환경설정 및 시스템 구성용)
 
-TOKENPROGRAM2022
-
-Utility for Token-2022 instructions (transferChecked, mintTo, burn, …).
-
-🔧 Dependencies
-
-Kotlin, Spring Boot
-
-solanaj
-(Solana Java/Kotlin SDK)
-
-bitcoinj (Base58), BouncyCastle (Ed25519), web3j (Mnemonic)
-
-PostgreSQL/JPA etc. (for config persistence in the broader project)
-
-build.gradle.kts (snippet):
-
+```kotlin
 dependencies {
-implementation("org.p2p:solanaj:<version>")
-implementation("org.bitcoinj:bitcoinj-core:<version>")
-implementation("org.bouncycastle:bcprov-jdk15on:<version>")
-implementation("org.web3j:core:<version>")
+    implementation("org.p2p:solanaj:<version>")
+    implementation("org.bitcoinj:bitcoinj-core:<version>")
+    implementation("org.bouncycastle:bcprov-jdk15on:<version>")
+    implementation("org.web3j:core:<version>")
 }
+🔐 환경 변수 / 시스템 설정
+서비스는 SystemConfigService를 통해 다음 키를 읽습니다.
 
-🔐 Configuration / System Settings
+키	설명
+WEB3_SOLANA_RPC_URL	Solana RPC 엔드포인트
+WEB3_SOLANA_WALLET_PRIVATE_KEY	송신자(Payer/Owner) 비밀키(Base58)
+WEB3_SOLANA_TOKEN_SRC_ADDRESS	SPL 토큰 Mint 주소
+WEB3_SOLANA_MINT_COLLECTION_ADDRESS	(옵션) 컬렉션 주소
+WEB3_SOLANA_MINT_CANDYMACHINE_ADDRESS	(옵션) 캔디머신 주소
+WEB3_SOLANA_MINT_CANDYGUARD_ADDRESS	(옵션) 캔디가드 주소
 
-Values are read via SystemConfigService.
+⚠️ 보안 주의
 
-Key	Description
-WEB3_SOLANA_RPC_URL	Solana RPC endpoint
-WEB3_SOLANA_WALLET_PRIVATE_KEY	Sender (payer/owner) Base58 private key
-WEB3_SOLANA_TOKEN_SRC_ADDRESS	SPL token mint address
-WEB3_SOLANA_MINT_COLLECTION_ADDRESS	(Optional) Collection address
-WEB3_SOLANA_MINT_CANDYMACHINE_ADDRESS	(Optional) Candy Machine address
-WEB3_SOLANA_MINT_CANDYGUARD_ADDRESS	(Optional) Candy Guard address
+프라이빗 키는 절대 코드/레포에 커밋하지 말고, 시크릿 매니저/환경변수로 관리하세요.
 
-Security
+RPC는 신뢰 가능한 엔드포인트(슬롯 안정성, 레이트 한도 등)를 사용하세요.
 
-Never commit private keys. Use secret managers / env vars.
-
-Use a reliable RPC (slots/latency/rate limits).
-
-🌳 Environment Switching (Token Program)
+🌳 환경 분기 (Token Program 선택)
+kotlin
+코드 복사
 private fun getTokenProgram(): PublicKey {
-return if (environmentUtil.isProd()) {
-PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")   // Token Program (SPL)
-} else {
-PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")   // Token-2022
+    return if (environmentUtil.isProd()) {
+        PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")   // Token Program
+    } else {
+        PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")   // Token-2022 Program
+    }
 }
-}
+prod: TokenProgram + decimals = 8 (예시)
 
+dev: Token-2022 + decimals = 9 (예시)
 
-prod: TokenProgram (example decimals=8)
+필요 시 프로젝트 정책에 맞게 decimals / RPC / lamports 변환을 조정하세요.
 
-dev: Token-2022 (example decimals=9)
-
-Adjust decimals/RPC/lamports conversion based on your actual mint.
-
-🧪 Usage Examples
-1) SOL Balance
-   val service = SolanaTransferService(systemConfigService, environmentUtil)
-   val sol = service.getSolanaBalance("PUBLIC_KEY_BASE58")
-   println("SOL balance = $sol")
-
-2) SPL Balance
-   val spl = service.getSplBalance("USER_PUBLIC_KEY_BASE58")
-   println("SPL balance = $spl")
-
-3) Transfer SOL
-   val result = service.transferSolana(
-   recipientPublicKey = "RECIPIENT_PUBLIC_KEY_BASE58",
-   amount = BigDecimal("0.01")
-   )
-   println("tx = ${result.tx}")
-
-4) Transfer SPL (auto-creates ATA)
-   val result = service.transferSpl(
-   recipientPublicKey = "RECIPIENT_PUBLIC_KEY_BASE58",
-   amount = BigDecimal("5")   // token units (not lamports)
-   )
-   println("tx = ${result.tx}")
-
-
-Notes
-
-transferSpl checks sender/recipient ATA and creates them idempotently if missing.
-
-Amounts are in token units; the service applies environment-specific lamports conversion (decimals).
-
-🔁 Retry & Finalization
-val sig = sendAndConfirmTransactionWithRetry(
-transaction = tx,
-senderKeypair = payer,
-maxRetries = 10
+🧪 사용 예시
+1️⃣ SOL 잔액 조회
+kotlin
+코드 복사
+val service = SolanaTransferService(systemConfigService, environmentUtil)
+val sol = service.getSolanaBalance("PUBLIC_KEY_BASE58")
+println("SOL balance = $sol")
+2️⃣ SPL 잔액 조회
+kotlin
+코드 복사
+val spl = service.getSplBalance("USER_PUBLIC_KEY_BASE58")
+println("SPL balance = $spl")
+3️⃣ SOL 전송
+kotlin
+코드 복사
+val result = service.transferSolana(
+    recipientPublicKey = "RECIPIENT_PUBLIC_KEY_BASE58",
+    amount = BigDecimal("0.01")
 )
+println("tx = ${result.tx}")
+4️⃣ SPL 전송 (ATA 자동 생성 포함)
+kotlin
+코드 복사
+val result = service.transferSpl(
+    recipientPublicKey = "RECIPIENT_PUBLIC_KEY_BASE58",
+    amount = BigDecimal("5")   // 토큰 단위 (lamports 아님)
+)
+println("tx = ${result.tx}")
+💡 transferSpl()은 내부적으로 발신자/수신자 ATA를 확인하고,
+없으면 idempotent하게 생성합니다.
+금액 단위는 토큰 단위이며, 내부에서 환경에 맞는 lamports 변환(decimals)을 수행합니다.
 
+🔁 트랜잭션 재시도 & 최종 확정 확인
+kotlin
+코드 복사
+val sig = sendAndConfirmTransactionWithRetry(
+    transaction = tx,
+    senderKeypair = payer,
+    maxRetries = 10
+)
+getSignatureStatuses로 finalized 상태를 확인할 때까지 polling
 
-Polls getSignatureStatuses until finalized.
+네트워크 지연 / 슬롯 재구성 상황에서 신뢰성 보강
 
-Adds resilience against network delays / slot reorgs.
+timeoutMillis, intervalMillis는 운영 환경에 맞게 조정 권장
 
-Tune timeoutMillis / intervalMillis for production.
-
-🧮 Decimals & Lamports
-
+🧮 단위 / 정밀도(Decimals) & Lamports 변환
 LAMPORTS_PER_SOL = 1_000_000_000
 
-Token decimals vary by mint. The code uses 8/9 as examples—match your mint.
+토큰마다 decimals가 다릅니다.
+본 모듈은 환경에 따라 8/9 예시로 동작합니다.
+실제 Mint의 Decimals와 일치하도록 확인/변경하세요.
 
-Non-standard constants (e.g., PROD_LAMPORTS_PER_SOL = 100_000_000) should reflect your token policy/spec.
+PROD_LAMPORTS_PER_SOL = 100_000_000 등 비표준 상수는
+프로젝트 정책/토큰 스펙에 맞게 관리하세요.
 
-🧱 Error Handling
+🧱 예외 / 에러 처리 가이드
+상황	예외
+잔액 부족	IllegalArgumentException("Insufficient balance")
+음수 금액	IllegalArgumentException("Negative numbers are not allowed.")
+RPC 실패	RpcException 캐치 후 IllegalStateException 래핑
+전송 미확정	sendAndConfirmTransactionWithRetry에서 IllegalStateException 발생
 
-Insufficient balance: IllegalArgumentException("Insufficient balance")
+운영 환경에서는 CloudWatch / Discord 등의 모니터링 시스템과 연결해
+에러 및 상태 로깅을 강화하는 것을 권장합니다.
 
-Negative amount: IllegalArgumentException("Negative numbers are not allowed.")
+🧰 테스트 / 검증 팁
+Devnet RPC로 기능 검증 후 Mainnet 반영
 
-RPC errors: catch RpcException, rethrow IllegalStateException
+소액 전송 → ATA 자동 생성 → 재시도 / 확정 확인 순으로 시나리오 테스트
 
-Not finalized after retries: IllegalStateException from sendAndConfirmTransactionWithRetry
+Mint decimals 실제 값과 코드 상수 일치 여부 확인
 
-For production, wire logs/alerts (e.g., CloudWatch/Discord).
+RPC Rate Limit 고려하여 재시도 및 타임아웃 조정
 
-🧰 Testing Tips
+🧭 프로젝트 맥락에의 통합
+Safe Road Club (SRC) 프로젝트 내에서 본 모듈은 다음 목표를 가집니다:
 
-Validate on Devnet first, then Mainnet.
+Web3.js 기반 프론트 트랜잭션을 백엔드 서버로 이관 (보안/안정성/운영 효율 향상)
 
-E2E flow: small transfer → ATA creation → retry/finalization.
+토큰 거래 무결성(비관적 락) + CI/CD 자동배포 (ECS/Jenkins) +
+모니터링(CloudWatch/Discord) 환경과 결합
 
-Verify mint decimals matches service constants.
+P2E / 데이터 수익화 워크플로우에 자연스럽게 연결되는 온체인 인프라 레이어 역할 수행
 
-Respect RPC rate limits; tune timeouts and retry intervals.
+⚠️ 보안 체크리스트
+ 프라이빗 키 / 민감 설정값은 시크릿 매니저 / 환경변수로 관리
 
-🧭 Project Context
+ RPC 엔드포인트 접근 제어 및 Rate Limit 파악
 
-This module is part of Safe Road Club (SRC):
+ 트랜잭션 / 서명 / 에러 로그에 민감정보(키·시드) 노출 금지
 
-Move transaction logic from the web client to the backend for security & operability.
+ 운영 전 Devnet 리허설 필수
 
-Combine with pessimistic locking (double-spend guard), CI/CD (ECS/Jenkins), and monitoring (CloudWatch/Discord).
+📄 라이선스
+사내 / 프로젝트 정책에 맞추어 지정하세요.
+(예: Private / Apache-2.0 / MIT 등)
 
-Serves as the on-chain infrastructure layer for P2E / data monetization workflows.
+🙌 기여
+버그 및 개선 제안은 Issue 탭을 통해 등록해주세요.
 
-⚠️ Security Checklist
+향후 계획:
 
-Manage secrets via secret manager/env vars.
+Token-2022 기능 확장 (메타데이터 / 확장 자산 등)
 
-RPC access control & rate limits understood.
+NFT 민팅 (Candy Machine / Candy Guard) 연동
 
-No sensitive data (keys/seeds) in logs.
-
-Devnet rehearsal before production.
-
-📄 License
-
-Choose per your org policy (e.g., Private / Apache-2.0 / MIT).
-
-🙌 Contributing
-
-Please open issues for bugs/feature requests.
-
-Roadmap ideas: Token-2022 extensions (metadata/programmable assets), NFT minting (Candy Machine/Guard) integration.
